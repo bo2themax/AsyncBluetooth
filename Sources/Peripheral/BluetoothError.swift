@@ -20,4 +20,10 @@ public enum BluetoothError: Error {
     case unableToConvertValueToData
     case noConnectionToPeripheralExists
     case operationCancelled
+
+    // MARK: - Peripheral Manager
+    case advertisingInProgress
+    case serviceAdditionInProgress
+    case channelPublishingInProgress
+    case channelUnpublishingInProgress
 }
