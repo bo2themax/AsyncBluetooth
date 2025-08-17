@@ -30,7 +30,7 @@ actor CentralManagerContext {
         }
     }
     
-    nonisolated private(set) lazy var eventSubject = PassthroughSubject<CentralManagerEvent, Never>()
+    nonisolated let eventSubject = PassthroughSubject<CentralManagerEvent, Never>()
     
     private(set) lazy var waitUntilReadyExecutor = {
         let executor = AsyncSerialExecutor<Void>()
