@@ -13,8 +13,8 @@ public enum PeripheralManagerEvent {
     case didAddService(_ service: CBService, error: Error?, manager: PeripheralManager)
     case centralDidSubscribe(_ central: CBCentral, Characteristic: CBCharacteristic, manager: PeripheralManager)
     case centralDidUnsubscribe(_ central: CBCentral, Characteristic: CBCharacteristic, manager: PeripheralManager)
-    case didReceiveRead(_ request: [CBATTRequest], manager: PeripheralManager)
-    case didReceiveWrite(_ request: [CBATTRequest], manager: PeripheralManager)
+    case didReceiveRead(_ request: CBATTRequest, manager: PeripheralManager)
+    case didReceiveWrite(_ requests: [CBATTRequest], manager: PeripheralManager)
     case isReadyToUpdateSubscribers(manager: PeripheralManager)
     case didPublishL2CAPChannel(_ psm: CBL2CAPPSM, error: Error?, manager: PeripheralManager)
     case didUnpublishL2CAPChannel(_ psm: CBL2CAPPSM, error: Error?, manager: PeripheralManager)
@@ -31,8 +31,8 @@ enum InternalPeripheralManagerEvent {
     case didAddService(_ service: CBService, error: Error?)
     case centralDidSubscribe(_ central: CBCentral, Characteristic: CBCharacteristic)
     case centralDidUnsubscribe(_ central: CBCentral, Characteristic: CBCharacteristic)
-    case didReceiveRead(_ request: [CBATTRequest])
-    case didReceiveWrite(_ request: [CBATTRequest])
+    case didReceiveRead(_ request: CBATTRequest)
+    case didReceiveWrite(_ requests: [CBATTRequest])
     case isReadyToUpdateSubscribers
     case didPublishL2CAPChannel(_ psm: CBL2CAPPSM, error: Error?)
     case didUnpublishL2CAPChannel(_ psm: CBL2CAPPSM, error: Error?)
@@ -54,8 +54,8 @@ enum InternalPeripheralManagerEvent {
             return .centralDidUnsubscribe(central, Characteristic: characteristic, manager: manager)
         case .didReceiveRead(let request):
             return .didReceiveRead(request, manager: manager)
-        case .didReceiveWrite(let request):
-            return .didReceiveWrite(request, manager: manager)
+        case .didReceiveWrite(let requests):
+            return .didReceiveWrite(requests, manager: manager)
         case .isReadyToUpdateSubscribers:
             return .isReadyToUpdateSubscribers(manager: manager)
         case .didPublishL2CAPChannel(let psm, let error):

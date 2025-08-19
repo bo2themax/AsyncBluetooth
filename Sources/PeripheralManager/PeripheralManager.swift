@@ -91,7 +91,7 @@ public final class PeripheralManager: Sendable {
         switch isBluetoothReadyResult {
         case .success:
             return
-        case .failure(let error):
+        case let .failure(error):
             throw error
         }
     }
@@ -141,11 +141,12 @@ public final class PeripheralManager: Sendable {
     /**
      Advertises peripheral manager data.
 
-     - Parameter advertisementData: An optional dictionary containing the data to be advertised.
+     - Parameter localName: The local name of a peripheral.
+     - Parameter serviceUUIDs: An array of service UUIDs.
 
      [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/startadvertising(_:))
      */
-    public func startAdvertising(_ advertisementData: [String: Any]?) async throws {
+    public func startAdvertising(localName: String? = nil, serviceUUIDs: [UUID]? = nil) async throws {
         guard await !context.startAdvertisingExecutor.hasWork else {
             Self.logger.error("Unable to start advertising, because an advertising attempt is already in progress")
             throw BluetoothError.advertisingInProgress
@@ -155,20 +156,73 @@ public final class PeripheralManager: Sendable {
             guard let self else {
                 return
             }
-            Self.logger.info("Advertising \(advertisementData ?? [:])")
-            self.cbPeripheralManager.startAdvertising(advertisementData)
+            Self.logger.info("Advertising localName: \(localName ?? "nil"), service ids: \(serviceUUIDs ?? [])")
+            self.cbPeripheralManager.startAdvertising([
+                CBAdvertisementDataLocalNameKey: localName as Any,
+                CBAdvertisementDataServiceUUIDsKey: serviceUUIDs?.map(CBUUID.init(nsuuid:)) as Any,
+            ])
         }
     }
 
     /**
      Stops advertising peripheral data.
 
-     [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/stopadvertising())
+     [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/stopadvertising/)
      */
     public func stopAdvertising() async {
         Self.logger.info("Stopping advertising...")
         await context.startAdvertisingExecutor.flush(error: BluetoothError.operationCancelled)
         cbPeripheralManager.stopAdvertising()
+    }
+
+    /// Cancels all pending operations, stops scanning and awaiting for any responses.
+    /// - Note: Operation for Peripherals will not be cancelled. To do that, call `cancelAllOperations()` on the `Peripheral`.
+    public func cancelAllOperations() async {
+        if isAdvertising {
+            await stopAdvertising()
+        }
+        await context.flush(error: BluetoothError.operationCancelled)
+    }
+
+    /**
+     Returns a publisher that emits every read request (`CBATTRequest`) received from the specified central.
+
+     - Parameter central: The `Central` for which to observe incoming read requests.
+     - Returns: An `AnyPublisher` that emits each `CBATTRequest` as it is received. The publisher never fails.
+
+     Use this method to reactively handle read requests from a connected central device. You are responsible for responding to these requests using the `respond(to:withResult:)` method. Only requests that match the specified central are emitted.
+     */
+    public func readRequest(for central: Central) -> AnyPublisher<CBATTRequest, Never> {
+        context.eventSubject
+            .compactMap { [weak central] event -> CBATTRequest? in
+                if case let .didReceiveRead(request) = event, request.central.identifier == central?.cbCentral.identifier {
+                    return request
+                } else {
+                    return nil
+                }
+            }
+            .eraseToAnyPublisher()
+    }
+
+    /**
+     Returns a publisher that emits write requests (`[CBATTRequest]`) received from the specified central.
+
+     - Parameter central: The `Central` for which to observe incoming read requests.
+     - Returns: An `AnyPublisher` that emits `[CBATTRequest]` as it is received. The publisher never fails.
+
+     Use this method to reactively handle read requests from a connected central device. You are responsible for responding to these requests using the `respond(to:withResult:)` method. Only requests that match the specified central are emitted.
+     */
+    public func writeRequests(for central: Central) -> AnyPublisher<[CBATTRequest], Never> {
+        context.eventSubject
+            .map { [weak central] event -> [CBATTRequest] in
+                if case let .didReceiveWrite(requests) = event {
+                    return requests.filter({ $0.central.identifier == central?.cbCentral.identifier })
+                } else {
+                    return []
+                }
+            }
+            .filter { !$0.isEmpty }
+            .eraseToAnyPublisher()
     }
 
     /**
@@ -179,11 +233,13 @@ public final class PeripheralManager: Sendable {
        - characteristic: The characteristic to update.
        - onSubscribedCentrals: An optional array of centrals to notify.
 
-     This method will check if
+     This method attempts to send the update to the subscribed central(s). If the transmit queue is full and the update cannot be sent, it waits for `peripheralManagerIsReady(toUpdateSubscribers:)` before retrying. To cancel the retry, wrap this call in a Task and cancel the Task as needed.
+
      [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/updatevalue(_:for:onsubscribedcentrals:))
      */
-    public func updateValue(_ value: Data, for characteristic: CBMutableCharacteristic, onSubscribedCentrals centrals: [Central]? = nil) async throws {
-        let sent = cbPeripheralManager.updateValue(value, for: characteristic, onSubscribedCentrals: centrals?.map(\.cbCentral))
+    public func updateValue(_ value: Data, for characteristic: CBMutableCharacteristic, onSubscribedCentrals centrals: [CBCentral]? = nil) async throws {
+        try Task.checkCancellation()
+        let sent = cbPeripheralManager.updateValue(value, for: characteristic, onSubscribedCentrals: centrals)
         guard !sent else {
             Self.logger.info("Sent data for \(characteristic) to \(centrals ?? [])...")
             return // success
@@ -325,6 +381,7 @@ extension PeripheralManager.DelegateWrapper: CBPeripheralManagerDelegate {
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
+        Self.logger.info("peripheralManager central \(central), didSubscribeTo \(characteristic)")
         context.eventSubject.send(.centralDidSubscribe(central, Characteristic: characteristic))
         Task {
             var existing = await context.subscribedCentrals
@@ -338,18 +395,30 @@ extension PeripheralManager.DelegateWrapper: CBPeripheralManagerDelegate {
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
+        Self.logger.info("peripheralManager central \(central), didUnsubscribeFrom \(characteristic)")
         context.eventSubject.send(.centralDidUnsubscribe(central, Characteristic: characteristic))
+        Task {
+            var existing = await context.subscribedCentrals
+            if let idx = existing.firstIndex(where: { $0.identifier == central.identifier }) {
+                existing[idx].isSubscribed.value = false
+                existing.remove(at: idx)
+            }
+            await context.updateSubscribedCentrals(existing)
+        }
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
-        context.eventSubject.send(.didReceiveRead([request]))
+        Self.logger.info("peripheralManager didReceiveRead \(request)")
+        context.eventSubject.send(.didReceiveRead(request))
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        Self.logger.info("peripheralManager didReceiveWrite \(requests)")
         context.eventSubject.send(.didReceiveWrite(requests))
     }
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        Self.logger.info("peripheralManagerIsReady toUpdateSubscribers")
         context.eventSubject.send(.isReadyToUpdateSubscribers)
         Task {
             await context.updateValueWaitingExecutor.flush(.success(()))
@@ -383,6 +452,7 @@ extension PeripheralManager.DelegateWrapper: CBPeripheralManagerDelegate {
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didOpen channel: CBL2CAPChannel?, error: (any Error)?) {
+        Self.logger.info("peripheralManager didOpen \(channel), error: \(error.flatMap(String.init(describing:)) ?? "nil")")
         context.eventSubject.send(.didOpenL2CAPChannel(channel, error: error))
     }
 }
