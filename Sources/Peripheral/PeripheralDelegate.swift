@@ -97,6 +97,19 @@ extension PeripheralDelegate: CBPeripheralDelegate {
         }
     }
     
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        Self.logger.info("\(#function), \(peripheral)")
+        context.serialExecutor.enqueue { [weak self] in
+            guard let self else { return }
+            do {
+                try await context.writeWithoutResponseCharacteristicValueExecutor.setWorkCompletedWithResult(.success(()))
+            } catch {
+                Self.logger.warning("Received peripheralIsReadyToSendWriteWithoutResponse without a continuation: \(error)")
+            }
+        }
+        context.isReadyToSendWriteWithoutResponse.send()
+    }
+    
     func peripheral(
         _ cbPeripheral: CBPeripheral,
         didUpdateNotificationStateFor characteristic: CBCharacteristic,

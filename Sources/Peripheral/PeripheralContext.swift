@@ -8,7 +8,9 @@ import Combine
 actor PeripheralContext {
     nonisolated let characteristicValueUpdatedSubject = PassthroughSubject<CharacteristicValueUpdateEventData, Never>()
     nonisolated let invalidatedServicesSubject = PassthroughSubject<[Service], Never>()
-    
+    nonisolated let isReadyToSendWriteWithoutResponse = PassthroughSubject<Void, Never>()
+    let serialExecutor = SerialExecutor()
+
     private(set) lazy var readRSSIExecutor = {
         let executor = AsyncSerialExecutor<NSNumber>()
         Task {
@@ -46,7 +48,13 @@ actor PeripheralContext {
         flushableExecutors.append(executor)
         return executor
     }()
-    
+
+    private(set) lazy var writeWithoutResponseCharacteristicValueExecutor = {
+        let executor = AsyncSerialExecutor<Void>()
+        flushableExecutors.append(executor)
+        return executor
+    }()
+
     private(set) lazy var setNotifyValueExecutor = {
         let executor = AsyncExecutorMap<CBUUID, Void>()
         flushableExecutors.append(executor)

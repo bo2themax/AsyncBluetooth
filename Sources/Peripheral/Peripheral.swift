@@ -55,6 +55,14 @@ public final class Peripheral: Sendable {
         #endif
     }
     
+    public var canSendWriteWithoutResponse: Bool {
+        cbPeripheral.canSendWriteWithoutResponse
+    }
+    
+    public var isReadyToSendWriteWithoutResponse: AnyPublisher<Void, Never> {
+        context.isReadyToSendWriteWithoutResponse.eraseToAnyPublisher()
+    }
+    
     public let cbPeripheral: CBPeripheral
     
     private var context: PeripheralContext {
@@ -151,16 +159,25 @@ public final class Peripheral: Sendable {
     
     /// Writes the value of a characteristic.
     public func writeValue(_ data: Data, for characteristic: Characteristic, type: CBCharacteristicWriteType) async throws {
-        try await self.context.writeCharacteristicValueExecutor.enqueue(withKey: characteristic.uuid) { [weak self] in
-            guard let self = self else { return }
-            
-            self.cbPeripheral.writeValue(data, for: characteristic.cbCharacteristic, type: type)
-            
-            guard type == .withoutResponse else {
+        switch type {
+        case .withResponse:
+            try await self.context.writeCharacteristicValueExecutor.enqueue(withKey: characteristic.uuid) { [weak self] in
+                guard let self = self else { return }
+
+                self.cbPeripheral.writeValue(data, for: characteristic.cbCharacteristic, type: type)
+            }
+        case .withoutResponse:
+            if self.cbPeripheral.canSendWriteWithoutResponse {
+                self.cbPeripheral.writeValue(data, for: characteristic.cbCharacteristic, type: type)
                 return
             }
-            
-            self.cbPeripheralDelegate.peripheral(self.cbPeripheral, didWriteValueFor: characteristic.cbCharacteristic, error: nil)
+            try await self.context.writeWithoutResponseCharacteristicValueExecutor.enqueue { [weak self] in
+                guard let self = self else { return }
+
+                self.cbPeripheral.writeValue(data, for: characteristic.cbCharacteristic, type: type)
+            }
+        @unknown default:
+            preconditionFailure("Unhandled CBCharacteristicWriteType: \(type)")
         }
     }
     
