@@ -65,14 +65,6 @@ public final class Peripheral: Sendable {
     
     public let cbPeripheral: CBPeripheral
 
-    public var canSendWriteWithoutResponse: Bool {
-        cbPeripheral.canSendWriteWithoutResponse
-    }
-
-    public var isReadyToSendWriteWithoutResponse: AnyPublisher<Void, Never> {
-        context.isReadyToSendWriteWithoutResponse.eraseToAnyPublisher()
-    }
-
     private var context: PeripheralContext {
         cbPeripheralDelegate.context
     }
