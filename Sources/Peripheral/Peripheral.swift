@@ -64,7 +64,15 @@ public final class Peripheral: Sendable {
     }
     
     public let cbPeripheral: CBPeripheral
-    
+
+    public var canSendWriteWithoutResponse: Bool {
+        cbPeripheral.canSendWriteWithoutResponse
+    }
+
+    public var isReadyToSendWriteWithoutResponse: AnyPublisher<Void, Never> {
+        context.isReadyToSendWriteWithoutResponse.eraseToAnyPublisher()
+    }
+
     private var context: PeripheralContext {
         cbPeripheralDelegate.context
     }
@@ -72,7 +80,7 @@ public final class Peripheral: Sendable {
     /// The delegate object that will receive `cbPeripheral` callbacks.
     /// - Note: We need to hold on to it because `cbPeripheral` has a weak reference to it.
     private let cbPeripheralDelegate: PeripheralDelegate
-    
+
     public init(_ cbPeripheral: CBPeripheral) {
         self.cbPeripheral = cbPeripheral
         

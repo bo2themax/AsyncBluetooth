@@ -13,9 +13,7 @@ actor PeripheralContext {
 
     private(set) lazy var readRSSIExecutor = {
         let executor = AsyncSerialExecutor<NSNumber>()
-        Task {
-            await flushableExecutors.append(executor)
-        }
+        flushableExecutors.append(executor)
         return executor
     }()
     
