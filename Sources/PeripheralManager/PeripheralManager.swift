@@ -103,7 +103,7 @@ public final class PeripheralManager: Sendable {
 
      [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/add(_:))
      */
-    public func add(_ service: CBMutableService) async throws {
+    public func add(_ service: MutableService) async throws {
         guard await !context.addServiceExecutor.hasWorkForKey(service.uuid.uuidString) else {
             Self.logger.error("Unable to add \(service), because an attempt is already in progress")
             throw BluetoothError.serviceAdditionInProgress
@@ -114,7 +114,7 @@ public final class PeripheralManager: Sendable {
                 return
             }
             Self.logger.info("Adding \(service)")
-            self.cbPeripheralManager.add(service)
+            self.cbPeripheralManager.add(service.cbService)
         }
     }
 
@@ -125,8 +125,8 @@ public final class PeripheralManager: Sendable {
 
      [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/remove(_:))
      */
-    public func remove(_ service: CBMutableService) {
-        cbPeripheralManager.remove(service)
+    public func remove(_ service: MutableService) {
+        cbPeripheralManager.remove(service.cbService)
     }
 
     /**
@@ -185,18 +185,18 @@ public final class PeripheralManager: Sendable {
     }
 
     /**
-     Returns a publisher that emits every read request (`CBATTRequest`) received from the specified central.
+     Returns a publisher that emits every read request (`ATTRequest`) received from the specified central.
 
      - Parameter central: The `Central` for which to observe incoming read requests.
-     - Returns: An `AnyPublisher` that emits each `CBATTRequest` as it is received. The publisher never fails.
+     - Returns: An `AnyPublisher` that emits each `ATTRequest` as it is received. The publisher never fails.
 
      Use this method to reactively handle read requests from a connected central device. You are responsible for responding to these requests using the `respond(to:withResult:)` method. Only requests that match the specified central are emitted.
      */
-    public func readRequest(for central: Central) -> AnyPublisher<CBATTRequest, Never> {
+    public func readRequest(for central: Central) -> AnyPublisher<ATTRequest, Never> {
         context.eventSubject
-            .compactMap { [weak central] event -> CBATTRequest? in
+            .compactMap { [weak central] event -> ATTRequest? in
                 if case let .didReceiveRead(request) = event, request.central.identifier == central?.cbCentral.identifier {
-                    return request
+                    return ATTRequest(cbRequest: request)
                 } else {
                     return nil
                 }
@@ -205,18 +205,19 @@ public final class PeripheralManager: Sendable {
     }
 
     /**
-     Returns a publisher that emits write requests (`[CBATTRequest]`) received from the specified central.
+     Returns a publisher that emits write requests (`[ATTRequest]`) received from the specified central.
 
      - Parameter central: The `Central` for which to observe incoming read requests.
-     - Returns: An `AnyPublisher` that emits `[CBATTRequest]` as it is received. The publisher never fails.
+     - Returns: An `AnyPublisher` that emits `[ATTRequest]` as it is received. The publisher never fails.
 
      Use this method to reactively handle read requests from a connected central device. You are responsible for responding to these requests using the `respond(to:withResult:)` method. Only requests that match the specified central are emitted.
      */
-    public func writeRequests(for central: Central) -> AnyPublisher<[CBATTRequest], Never> {
+    public func writeRequests(for central: Central) -> AnyPublisher<[ATTRequest], Never> {
         context.eventSubject
-            .map { [weak central] event -> [CBATTRequest] in
+            .map { [weak central] event -> [ATTRequest] in
                 if case let .didReceiveWrite(requests) = event {
-                    return requests.filter({ $0.central.identifier == central?.cbCentral.identifier })
+                    return requests.filter({ $0.central.identifier == central?.identifier })
+                        .map(ATTRequest.init(cbRequest:))
                 } else {
                     return []
                 }
@@ -237,9 +238,10 @@ public final class PeripheralManager: Sendable {
 
      [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/updatevalue(_:for:onsubscribedcentrals:))
      */
-    public func updateValue(_ value: Data, for characteristic: CBMutableCharacteristic, onSubscribedCentrals centrals: [CBCentral]? = nil) async throws {
+    public func updateValue(_ value: Data, for characteristic: MutableCharacteristic, onSubscribedCentrals centrals: [Central]? = nil) async throws {
         try Task.checkCancellation()
-        let sent = cbPeripheralManager.updateValue(value, for: characteristic, onSubscribedCentrals: centrals)
+        await preconditionValueLength(value, for: centrals ?? characteristic.subscribedCentrals ?? [])
+        let sent = cbPeripheralManager.updateValue(value, for: characteristic.cbCharacteristic, onSubscribedCentrals: centrals?.map(\.cbCentral))
         guard !sent else {
             Self.logger.info("Sent data for \(characteristic) to \(centrals ?? [])...")
             return // success
@@ -254,6 +256,13 @@ public final class PeripheralManager: Sendable {
         try await updateValue(value, for: characteristic, onSubscribedCentrals: centrals)
     }
 
+    private func preconditionValueLength(_ value: Data, for centrals: [Central]) async {
+        guard let maxLength = centrals.map(\.cbCentral.maximumUpdateValueLength).min() else {
+            return
+        }
+        precondition(value.count <= maxLength, "The length of the value parameter exceeds the length of the minimum `maximumUpdateValueLength` property of a subscribed centrals, the value may not be sent successfully")
+    }
+
     /**
      Responds to a read request from a central.
 
@@ -263,8 +272,8 @@ public final class PeripheralManager: Sendable {
 
      [Official Documentation](https://developer.apple.com/documentation/corebluetooth/cbperipheralmanager/respond(to:withresult:))
      */
-    public func respond(to request: CBATTRequest, withResult result: CBATTError.Code) {
-        cbPeripheralManager.respond(to: request, withResult: result)
+    public func respond(to request: ATTRequest, withResult result: CBATTError.Code) {
+        cbPeripheralManager.respond(to: request.cbRequest, withResult: result)
     }
 
     /**
