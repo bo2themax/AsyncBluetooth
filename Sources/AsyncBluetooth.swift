@@ -2,6 +2,7 @@
 
 import Foundation
 import os.log
+@_exported import CoreBluetooth
 
 public struct AsyncBluetooth {
     static let commonLogger = Logger(
