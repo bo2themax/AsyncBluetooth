@@ -145,6 +145,61 @@ centralManager.eventPublisher
     .store(in: &cancellables)
 ```
 
+### Advertising Peripherals
+
+To advertise your device as a Bluetooth peripheral, use the `PeripheralManager`. Here’s a step-by-step example:
+
+```swift
+// 1. Wait until the PeripheralManager is ready
+try await peripheralManager.waitUntilReady()
+
+// 2. Remove any existing services if needed
+peripheralManager.removeAllServices()
+
+// 3. Define characteristics for communication
+let centralToPeripheralCharacteristic = MutableCharacteristic(
+    type: UUID(uuidString: "993F9F06-A952-4909-8BA8-72FDB46A8607")!,
+    properties: [.write, .writeWithoutResponse],
+    value: nil,
+    permissions: [.writeable] // Central can write, peripheral can read
+)
+
+let peripheralToCentralCharacteristic = MutableCharacteristic(
+    type: UUID(uuidString: "E88002B3-3A05-4F71-9332-CE59CF8DCDA6")!,
+    properties: [.notify, .indicate],
+    value: nil,
+    permissions: [.readable] // Peripheral can notify, central can read
+)
+
+// 4. Create a service and add the characteristics
+let service = MutableService(
+    type: UUID(uuidString: "E88002B2-3A05-4F71-9332-CE59CF8DCDA6")!,
+    primary: true
+)
+service.characteristics = [centralToPeripheralCharacteristic, peripheralToCentralCharacteristic]
+
+// 5. Add the service to the PeripheralManager
+try await peripheralManager.add(service)
+
+// 6. Start advertising if not already advertising
+guard !peripheralManager.isAdvertising else { return }
+try await peripheralManager.startAdvertising(
+    localName: "Cookbook",
+    serviceUUIDs: [UUID(uuidString: "E88002B2-3A05-4F71-9332-CE59CF8DCDA6")!]
+)
+
+// 7. Track subscribed centrals for later use
+subscribedCentrals = await peripheralManager.subscribedCentrals.filter { $0.isSubscribed.value }
+centralObserver = peripheralManager.subscribedCentralsPublisher
+    .sink { [weak self] newValue in
+        self?.subscribedCentrals = newValue.filter { $0.isSubscribed.value }
+    }
+```
+
+This example shows how to set up a peripheral, define its services and characteristics, start advertising, and monitor which centrals are subscribed.
+
+For demo case, check out [AsyncBluetooth Cookbook](https://github.com/manolofdez/AsyncBluetoothCookbook).
+
 ### Logging
 
 The library uses `os.log` to provide logging for several operations. These logs are enabled by default. If you wish to disable them, you can do:
