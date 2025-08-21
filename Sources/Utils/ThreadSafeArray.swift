@@ -4,7 +4,7 @@ import Foundation
 
 actor ThreadSafeArray<Element> {
     
-    private var array: [Element]
+    private(set) var array: [Element]
     
     init(array: [Element] = []) {
         self.array = array
